@@ -1,0 +1,26 @@
+[project]
+name = "project"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "customtkinter>=5.2.2",
+    "huggingface-hub>=1.14.0",
+    "nltk>=3.9.4",
+    "onnxruntime>=1.25.1",
+    "qdrant-client>=1.17.1",
+    "requests>=2.33.1",
+    "spacy>=3.8.14",
+    "transformers>=5.8.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+]
+
+[tool.pytest.ini_options]
+pythonpath = [
+    "."
+]
