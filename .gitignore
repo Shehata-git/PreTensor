@@ -1,3 +1,7 @@
 .aider*
 /mydocs
 /model_cache
+/memory.db
+/qdrant_db/.lock
+/qdrant_db/collection/memory_chunks/storage.sqlite
+/qdrant_db/meta.json
