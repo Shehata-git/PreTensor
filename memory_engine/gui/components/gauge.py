@@ -2,8 +2,11 @@ import customtkinter as ctk
 import math
 
 class CTkGauge(ctk.CTkCanvas):
-    def __init__(self, master, label="Metric", min_val=0, max_val=100, unit="", color="#3B8ED0", **kwargs):
-        super().__init__(master, highlightthickness=0, bg=master._apply_appearance_mode(master._fg_color), **kwargs)
+    def __init__(self, master, label="Metric", min_val=0, max_val=100, unit="", color="#6C63FF", **kwargs):
+        # Resolve the background color properly from customtkinter
+        bg_color = self._get_bg_color(master)
+        
+        super().__init__(master, highlightthickness=0, bg=bg_color, **kwargs)
         self.label = label
         self.min_val = min_val
         self.max_val = max_val
@@ -12,6 +15,18 @@ class CTkGauge(ctk.CTkCanvas):
         self.value = min_val
         
         self.bind("<Configure>", lambda e: self.draw())
+
+    def _get_bg_color(self, master):
+        try:
+            fg_color = master.cget("fg_color")
+            if fg_color == "transparent":
+                return self._get_bg_color(master.master)
+            return master._apply_appearance_mode(fg_color)
+        except (AttributeError, ValueError):
+            try:
+                return master.cget("bg")
+            except Exception:
+                return "#13131A"
 
     def set_value(self, val):
         self.value = max(self.min_val, min(self.max_val, val))
@@ -24,25 +39,41 @@ class CTkGauge(ctk.CTkCanvas):
         if width <= 1 or height <= 1: return
 
         center_x = width / 2
-        center_y = height * 0.8
-        radius = min(width / 2, height * 0.7) - 10
+        center_y = height / 2
+        radius = min(width, height) / 2 - 15
+        thickness = 12
         
-        # Background arc
-        self.create_arc(
+        # Background Ring (Darker shade)
+        self.create_oval(
             center_x - radius, center_y - radius,
             center_x + radius, center_y + radius,
-            start=0, extent=180, outline="#333333", width=10, style="arc"
+            outline="#333345", width=thickness
         )
         
-        # Value arc
+        # Progress Arc (Doughnut style)
         percentage = (self.value - self.min_val) / (self.max_val - self.min_val)
-        extent = 180 * percentage
-        self.create_arc(
-            center_x - radius, center_y - radius,
-            center_x + radius, center_y + radius,
-            start=180, extent=-extent, outline=self.color, width=10, style="arc"
+        extent = 359.99 * percentage # Almost full circle
+        
+        if extent > 0:
+            self.create_arc(
+                center_x - radius, center_y - radius,
+                center_x + radius, center_y + radius,
+                start=90, extent=-extent, outline=self.color, width=thickness, style="arc"
+            )
+        
+        # Center Text (Value)
+        val_text = f"{self.value:.1f}{self.unit}" if self.unit else f"{int(self.value)}"
+        self.create_text(
+            center_x, center_y - 5, 
+            text=val_text, 
+            fill="white", 
+            font=("Roboto", 14, "bold")
         )
         
-        # Label and value text
-        self.create_text(center_x, center_y - 20, text=f"{self.value:.1f}{self.unit}", fill="white", font=("Inter", 16, "bold"))
-        self.create_text(center_x, center_y + 10, text=self.label, fill="#888888", font=("Inter", 10))
+        # Label Text (Below Value)
+        self.create_text(
+            center_x, center_y + 15, 
+            text=self.label, 
+            fill="#A0A0B0", 
+            font=("Roboto", 10)
+        )
