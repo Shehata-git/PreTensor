@@ -6,3 +6,4 @@
 /qdrant_db/collection/memory_chunks/storage.sqlite
 /qdrant_db/meta.json
 /research
+/.env

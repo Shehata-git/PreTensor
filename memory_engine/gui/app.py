@@ -1,252 +1,250 @@
-import customtkinter as ctk
+import gi
+gi.require_version('Gtk', '3.0')
+from gi.repository import Gtk, Gdk, GLib, GObject
 import time
 import threading
 from memory_engine.llm.orchestrator import LLMOrchestrator
+from memory_engine.gui.theme import CSS
+from memory_engine.gui.components.telemetry import TelemetryBlock
+from memory_engine.gui.components.chat import ChatPane
 
-# --- Terminal Aesthetic Configuration (Upscaled v3) ---
-APP_BG = "#0B0B0F"
-PANEL_BG = "#14141D"
-ACCENT_COLOR = "#00E5FF" # Neon Cyan
-DANGER_COLOR = "#FF4B4B" # Sharp Red
-BORDER_COLOR = "#2A2A35"
-TEXT_PRIMARY = "#FFFFFF"
-TEXT_SECONDARY = "#A0A0B0"
-
-# Font Logic - Robust fallback chain for sharp Linux rendering
-def get_font(size=20, bold=False):
-    # Prioritize clean, sharp monospaced fonts available on Linux
-    families = ["JetBrains Mono", "Noto Sans Mono", "DejaVu Sans Mono", "Bitstream Vera Sans Mono", "Monospace", "Consolas"]
-    weight = "bold" if bold else "normal"
-    # ctk supports a tuple where families is a list for fallback
-    return (families, size, weight)
-
-FONT_H1 = get_font(28, True)
-FONT_MAIN = get_font(20)
-FONT_BOLD = get_font(20, True)
-FONT_SMALL = get_font(16)
-FONT_MONO = get_font(18) 
-
-ctk.set_appearance_mode("Dark")
-
-class SemanticMemoryApp(ctk.CTk):
+class SemanticMemoryApp(Gtk.Application):
     def __init__(self):
-        super().__init__()
-
-        self.title("TERMINAL // SEMANTIC_MEMORY_v3")
-        self.geometry("1700x1100") # Scaled up again
-        self.configure(fg_color=APP_BG)
-        
+        super().__init__(application_id="org.memory.engine")
         self.orchestrator = LLMOrchestrator()
         self.current_session_id = None
         self.comparison_mode = False
 
+    def do_activate(self):
+        # Window Setup
+        self.window = Gtk.ApplicationWindow(application=self, title="TERMINAL // SEMANTIC_MEMORY_v3")
+        self.window.set_default_size(1920, 1080)
+        
+        # Load CSS Provider
+        style_provider = Gtk.CssProvider()
+        style_provider.load_from_data(CSS)
+        Gtk.StyleContext.add_provider_for_screen(
+            Gdk.Screen.get_default(),
+            style_provider,
+            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+        )
+
         self._init_ui()
+        self.window.show_all()
+        
+        # Initially hide Method B components
+        self.chat_right.container.hide()
+        self.telemetry_right.container.hide()
+        
         self._load_sessions()
+        
+        # Trigger Model Warm-up Protocol
+        threading.Thread(target=self._warm_up_protocol, daemon=True).start()
+
+    def _warm_up_protocol(self):
+        GLib.idle_add(self.title_label.set_text, "WAKING MODEL...")
+        if self.orchestrator.warm_up_ollama():
+            GLib.idle_add(self.title_label.set_text, "READY // IDLE")
+        else:
+            GLib.idle_add(self.title_label.set_text, "CONNECTION ERROR // OLLAMA_OFFLINE")
 
     def _init_ui(self):
-        self.grid_columnconfigure(1, weight=1)
-        self.grid_rowconfigure(0, weight=1)
+        # Main Layout split: Sidebar | Content
+        self.main_split = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
+        self.window.add(self.main_split)
 
         # --- Sidebar ---
-        self.sidebar = ctk.CTkFrame(
-            self, width=400, corner_radius=0, 
-            fg_color=PANEL_BG, border_width=1, border_color=BORDER_COLOR
-        )
-        self.sidebar.grid(row=0, column=0, sticky="nsew")
-        
-        self.sidebar_header = ctk.CTkLabel(
-            self.sidebar, text="> CHAT_HISTORY", 
-            font=FONT_H1, text_color=ACCENT_COLOR
-        )
-        self.sidebar_header.pack(pady=(60, 40), padx=40, anchor="w")
-        
-        self.new_chat_btn = ctk.CTkButton(
-            self.sidebar, text="[ + INITIALIZE_NEW ]", 
-            font=FONT_BOLD,
-            fg_color="transparent", border_width=1, border_color=ACCENT_COLOR,
-            text_color=ACCENT_COLOR, hover_color="#003333",
-            height=65, corner_radius=0,
-            command=self._new_chat
-        )
-        self.new_chat_btn.pack(pady=15, padx=30, fill="x")
+        self.sidebar = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=15)
+        self.sidebar.get_style_context().add_class("sidebar")
+        self.sidebar.set_size_request(380, -1)
+        self.main_split.pack1(self.sidebar, resize=False, shrink=False)
 
-        self.delete_chat_btn = ctk.CTkButton(
-            self.sidebar, text="[ ! DELETE_ACTIVE ]", 
-            font=FONT_BOLD,
-            fg_color="transparent", border_width=1, border_color=DANGER_COLOR,
-            text_color=DANGER_COLOR, hover_color="#330000",
-            height=65, corner_radius=0,
-            command=self._delete_active_session
-        )
-        self.delete_chat_btn.pack(pady=15, padx=30, fill="x")
-        
-        self.session_list = ctk.CTkScrollableFrame(
-            self.sidebar, label_text="ARCHIVE_REGISTRY",
-            label_font=FONT_SMALL,
-            label_text_color=TEXT_SECONDARY,
-            fg_color="transparent", corner_radius=0
-        )
-        self.session_list.pack(fill="both", expand=True, padx=20, pady=40)
+        sidebar_header = Gtk.Label(label="> CHAT_HISTORY", xalign=0)
+        sidebar_header.get_style_context().add_class("header-label")
+        sidebar_header.set_margin_top(60)
+        sidebar_header.set_margin_bottom(40)
+        sidebar_header.set_margin_start(40)
+        self.sidebar.pack_start(sidebar_header, False, False, 0)
 
-        # --- Main View ---
-        self.main_container = ctk.CTkFrame(self, corner_radius=0, fg_color=APP_BG)
-        self.main_container.grid(row=0, column=1, sticky="nsew", padx=40, pady=40)
+        # Buttons Box
+        btn_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=15)
+        btn_box.set_margin_start(30)
+        btn_box.set_margin_end(30)
+        self.sidebar.pack_start(btn_box, False, False, 0)
+
+        self.new_chat_btn = Gtk.Button(label="[ + INITIALIZE_NEW ]")
+        self.new_chat_btn.get_style_context().add_class("accent")
+        self.new_chat_btn.set_size_request(-1, 65)
+        self.new_chat_btn.connect("clicked", self._new_chat)
+        btn_box.pack_start(self.new_chat_btn, False, False, 0)
+
+        self.delete_chat_btn = Gtk.Button(label="[ ! DELETE_ACTIVE ]")
+        self.delete_chat_btn.get_style_context().add_class("danger")
+        self.delete_chat_btn.set_size_request(-1, 65)
+        self.delete_chat_btn.connect("clicked", self._delete_active_session)
+        btn_box.pack_start(self.delete_chat_btn, False, False, 0)
+
+        archive_label = Gtk.Label(label="ARCHIVE_REGISTRY", xalign=0)
+        archive_label.get_style_context().add_class("secondary-label")
+        archive_label.set_margin_top(40)
+        archive_label.set_margin_start(20)
+        self.sidebar.pack_start(archive_label, False, False, 0)
+
+        self.session_scroll = Gtk.ScrolledWindow()
+        self.session_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self.session_scroll.set_margin_start(20)
+        self.session_scroll.set_margin_end(20)
+        self.session_scroll.set_margin_bottom(40)
         
+        self.session_list = Gtk.ListBox()
+        self.session_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        self.session_list.connect("row-selected", self._on_session_selected)
+        self.session_scroll.add(self.session_list)
+        self.sidebar.pack_start(self.session_scroll, True, True, 0)
+
+        # --- Main Area ---
+        self.main_container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.main_container.set_margin_top(40)
+        self.main_container.set_margin_bottom(40)
+        self.main_container.set_margin_start(40)
+        self.main_container.set_margin_end(40)
+        self.main_split.pack2(self.main_container, resize=True, shrink=False)
+
         # Header Row
-        self.header = ctk.CTkFrame(self.main_container, fg_color="transparent")
-        self.header.pack(fill="x", pady=(0, 40))
-        
-        self.title_label = ctk.CTkLabel(
-            self.header, text="READY // IDLE", 
-            font=FONT_H1, text_color=TEXT_PRIMARY
-        )
-        self.title_label.pack(side="left")
+        header_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=20)
+        header_row.set_margin_bottom(40)
+        self.main_container.pack_start(header_row, False, False, 0)
 
-        self.reset_btn = ctk.CTkButton(
-            self.header, text="RESET_VIEW", 
-            font=FONT_SMALL, fg_color="#2A2A35", corner_radius=0, 
-            width=150, height=50, command=self._reset_view
-        )
-        self.reset_btn.pack(side="left", padx=40)
-        
-        self.compare_toggle = ctk.CTkSwitch(
-            self.header, text="DUAL_QUERY_PIPELINE", 
-            font=FONT_SMALL,
-            progress_color=ACCENT_COLOR,
-            corner_radius=0,
-            command=self._toggle_comparison
-        )
-        self.compare_toggle.pack(side="right")
+        self.title_label = Gtk.Label(label="READY // IDLE", xalign=0)
+        self.title_label.get_style_context().add_class("header-label")
+        self.title_label.override_color(Gtk.StateFlags.NORMAL, Gdk.RGBA(1, 1, 1, 1))
+        header_row.pack_start(self.title_label, True, True, 0)
 
-        # --- Dashboard Area ---
-        self.dashboard_frame = ctk.CTkFrame(self.main_container, fg_color="transparent")
-        self.dashboard_frame.pack(fill="x", pady=(0, 40))
-        
-        self.telemetry_left = self._create_telemetry_block(self.dashboard_frame, "CONTEXT // QDRANT_RAW")
-        self.telemetry_right = self._create_telemetry_block(self.dashboard_frame, "CONTEXT // QDRANT_NLP_OPTIMIZED")
-        self.telemetry_right["frame"].pack_forget()
+        self.reset_btn = Gtk.Button(label="RESET_VIEW")
+        self.reset_btn.set_size_request(150, 50)
+        self.reset_btn.connect("clicked", lambda w: self._reset_view())
+        header_row.pack_start(self.reset_btn, False, False, 0)
 
-        # --- Chat Panes ---
-        self.chat_area = ctk.CTkFrame(self.main_container, fg_color="transparent")
-        self.chat_area.pack(fill="both", expand=True)
+        compare_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=15)
+        header_row.pack_start(compare_box, False, False, 0)
         
-        self.chat_left = self._create_chat_pane(self.chat_area, "RETRIEVAL_STREAM // METHOD_A")
-        self.chat_right = self._create_chat_pane(self.chat_area, "RETRIEVAL_STREAM // METHOD_B")
-        self.chat_right["frame"].pack_forget()
+        compare_label = Gtk.Label(label="DUAL_QUERY_PIPELINE")
+        compare_label.get_style_context().add_class("secondary-label")
+        compare_box.pack_start(compare_label, False, False, 0)
+        
+        self.compare_switch = Gtk.Switch()
+        self.compare_switch.connect("notify::active", self._toggle_comparison)
+        compare_box.pack_start(self.compare_switch, False, False, 0)
 
-        # --- Input Bar ---
-        self.input_frame = ctk.CTkFrame(self.main_container, fg_color="transparent")
-        self.input_frame.pack(fill="x", pady=(40, 0))
-        
-        self.input_box = ctk.CTkEntry(
-            self.input_frame, placeholder_text="INPUT_CMD >>", 
-            height=80, corner_radius=0, border_width=1, border_color=BORDER_COLOR,
-            fg_color=PANEL_BG, text_color=TEXT_PRIMARY,
-            font=FONT_MAIN
-        )
-        self.input_box.pack(side="left", fill="x", expand=True, padx=(0, 20))
-        self.input_box.bind("<Return>", lambda e: self._send_message())
-        
-        self.send_btn = ctk.CTkButton(
-            self.input_frame, text="EXECUTE", 
-            command=self._send_message, width=220, height=80, 
-            corner_radius=0, fg_color=ACCENT_COLOR, text_color="#000000",
-            font=FONT_BOLD
-        )
-        self.send_btn.pack(side="right")
+        # Telemetry Dashboard (Horizontal Paned for alignment with chat)
+        self.dashboard_split = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
+        self.dashboard_split.set_margin_bottom(40)
+        self.main_container.pack_start(self.dashboard_split, False, False, 0)
 
-    def _create_telemetry_block(self, master, title):
-        frame = ctk.CTkFrame(master, fg_color=PANEL_BG, corner_radius=0, border_width=1, border_color=BORDER_COLOR)
-        frame.pack(side="left", fill="both", expand=True, padx=10)
-        
-        ctk.CTkLabel(frame, text=title, font=FONT_MONO, text_color=ACCENT_COLOR).pack(pady=(20, 10), padx=20, anchor="w")
-        
-        metrics_container = ctk.CTkFrame(frame, fg_color="transparent")
-        metrics_container.pack(fill="x", padx=25, pady=20)
-        
-        def add_metric(label, color):
-            ctk.CTkLabel(metrics_container, text=label, font=FONT_SMALL, text_color=TEXT_SECONDARY).pack(anchor="w")
-            pb = ctk.CTkProgressBar(metrics_container, height=12, corner_radius=0, progress_color=color, fg_color="#1A1A25")
-            pb.pack(fill="x", pady=(5, 12))
-            pb.set(0)
-            val_lbl = ctk.CTkLabel(metrics_container, text="[ 0.0 ]", font=FONT_MONO, text_color=TEXT_PRIMARY)
-            val_lbl.pack(anchor="e")
-            return {"bar": pb, "label": val_lbl}
+        self.telemetry_left = TelemetryBlock("CONTEXT // QDRANT_RAW")
+        self.dashboard_split.pack1(self.telemetry_left.container, resize=True, shrink=False)
 
-        latency = add_metric("LATENCY_MS", ACCENT_COLOR)
-        tokens = add_metric("TOKENS_GEN", "#BF00FF")
-        vram = add_metric("VRAM_GB", "#FF0055")
-        
-        return {"frame": frame, "latency": latency, "tokens": tokens, "vram": vram}
+        self.telemetry_right = TelemetryBlock("CONTEXT // QDRANT_NLP_OPTIMIZED")
+        self.dashboard_split.pack2(self.telemetry_right.container, resize=True, shrink=False)
 
-    def _create_chat_pane(self, master, title):
-        frame = ctk.CTkFrame(master, fg_color=PANEL_BG, corner_radius=0, border_width=1, border_color=BORDER_COLOR)
-        frame.pack(side="left", fill="both", expand=True, padx=10)
-        
-        header = ctk.CTkLabel(frame, text=f"// {title}", font=FONT_MONO, text_color=TEXT_SECONDARY)
-        header.pack(pady=15, padx=20, anchor="w")
-        
-        text_area = ctk.CTkTextbox(
-            frame, fg_color="#0D0D14", text_color=TEXT_PRIMARY,
-            font=FONT_MAIN, wrap="word", spacing3=10, corner_radius=0,
-            border_width=0
-        )
-        text_area.pack(fill="both", expand=True, padx=4, pady=4)
-        text_area.configure(state="disabled")
-        
-        return {"frame": frame, "text": text_area}
+        # Sync Expanders
+        self.telemetry_left.container.connect("notify::expanded", self._sync_telemetry_expansion, "left")
+        self.telemetry_right.container.connect("notify::expanded", self._sync_telemetry_expansion, "right")
 
-    def _toggle_comparison(self):
-        self.comparison_mode = self.compare_toggle.get() == 1
+        # Chat Panes (Resizable Split)
+        self.chat_split = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
+        self.main_container.pack_start(self.chat_split, True, True, 0)
+
+        # Synchronize the two Paned positions (FIXED BindingFlags)
+        self.chat_split.bind_property("position", self.dashboard_split, "position", GObject.BindingFlags.BIDIRECTIONAL)
+
+        self.chat_left = ChatPane("RETRIEVAL_STREAM // METHOD_A")
+        self.chat_split.pack1(self.chat_left.container, resize=True, shrink=False)
+
+        self.chat_right = ChatPane("RETRIEVAL_STREAM // METHOD_B")
+        self.chat_split.pack2(self.chat_right.container, resize=True, shrink=False)
+
+        # Input Bar
+        input_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=20)
+        input_row.set_margin_top(40)
+        self.main_container.pack_start(input_row, False, False, 0)
+
+        self.input_entry = Gtk.Entry()
+        self.input_entry.set_placeholder_text("INPUT_CMD >>")
+        self.input_entry.set_size_request(-1, 80)
+        self.input_entry.connect("activate", self._send_message)
+        input_row.pack_start(self.input_entry, True, True, 0)
+
+        self.execute_btn = Gtk.Button(label="EXECUTE")
+        self.execute_btn.get_style_context().add_class("execute")
+        self.execute_btn.set_size_request(220, 80)
+        self.execute_btn.connect("clicked", self._send_message)
+        input_row.pack_start(self.execute_btn, False, False, 0)
+
+    def _toggle_comparison(self, switch, gparam):
+        self.comparison_mode = switch.get_active()
         if self.comparison_mode:
-            self.chat_right["frame"].pack(side="left", fill="both", expand=True, padx=10)
-            self.telemetry_right["frame"].pack(side="left", fill="both", expand=True, padx=10)
+            self.chat_right.container.show_all()
+            self.telemetry_right.container.show_all()
+            
+            # Use idle_add to ensure widgets are mapped and allocated before centering
+            GLib.idle_add(self._recenter_splits)
+            
+            # Ensure both start with the same expansion state
+            self.telemetry_right.container.set_expanded(self.telemetry_left.container.get_expanded())
             self._refresh_chat_history()
         else:
-            self.chat_right["frame"].pack_forget()
-            self.telemetry_right["frame"].pack_forget()
+            self.chat_right.container.hide()
+            self.telemetry_right.container.hide()
+
+    def _recenter_splits(self):
+        width = self.chat_split.get_allocated_width()
+        if width > 1:
+            # Subtract any internal spacing if necessary, but // 2 is the theoretical center
+            self.chat_split.set_position(width // 2)
+        return False # Only run once
+
+    def _sync_telemetry_expansion(self, expander, gparam, source):
+        state = expander.get_expanded()
+        target = self.telemetry_right.container if source == "left" else self.telemetry_left.container
+        if target.get_expanded() != state:
+            target.set_expanded(state)
 
     def _load_sessions(self):
-        for widget in self.session_list.winfo_children():
-            widget.destroy()
-            
+        # Clear ListBox
+        for child in self.session_list.get_children():
+            self.session_list.remove(child)
+
         sessions = self.orchestrator.sqlite.get_sessions()
         for s in sessions:
-            btn = ctk.CTkButton(
-                self.session_list, 
-                text=f"> {s['chat_title']}", 
-                fg_color="transparent", 
-                text_color=TEXT_SECONDARY,
-                hover_color="#1A1A25",
-                anchor="w",
-                font=FONT_SMALL,
-                height=55,
-                corner_radius=0,
-                command=lambda sid=s["session_id"], title=s["chat_title"]: self._select_session(sid, title)
-            )
-            btn.pack(fill="x", pady=5)
+            row = Gtk.ListBoxRow()
+            lbl = Gtk.Label(label=f"> {s['chat_title']}", xalign=0)
+            row.add(lbl)
+            row.session_id = s["session_id"]
+            row.chat_title = s["chat_title"]
+            self.session_list.add(row)
+        self.session_list.show_all()
 
-    def _select_session(self, session_id, title):
-        self.current_session_id = session_id
-        self.title_label.configure(text=f"CONNECTED // {title}")
-        self._refresh_chat_history()
+    def _on_session_selected(self, listbox, row):
+        if row:
+            self.current_session_id = row.session_id
+            self.title_label.set_text(f"CONNECTED // {row.chat_title}")
+            self._refresh_chat_history()
 
-    def _new_chat(self):
+    def _new_chat(self, button):
         self.current_session_id = None
-        self.title_label.configure(text="STATUS // PENDING_HANDSHAKE")
+        self.title_label.set_text("STATUS // PENDING_HANDSHAKE")
         self._reset_view()
 
     def _reset_view(self):
-        for pane in [self.chat_left, self.chat_right]:
-            pane["text"].configure(state="normal")
-            pane["text"].delete("1.0", "end")
-            pane["text"].configure(state="disabled")
+        self.chat_left.set_text("")
+        self.chat_right.set_text("")
 
-    def _delete_active_session(self):
+    def _delete_active_session(self, button):
         if self.current_session_id:
             self.orchestrator.sqlite.delete_session(self.current_session_id)
             self.current_session_id = None
-            self.title_label.configure(text="READY // IDLE")
+            self.title_label.set_text("READY // IDLE")
             self._load_sessions()
             self._reset_view()
 
@@ -259,17 +257,14 @@ class SemanticMemoryApp(ctk.CTk):
             panes.append(self.chat_right)
             
         for pane in panes:
-            pane["text"].configure(state="normal")
-            pane["text"].delete("1.0", "end")
+            pane.set_text("")
             for m in messages:
                 role_tag = "USER" if m['role'] == 'user' else "AI"
                 content = str(m['content'])
-                pane["text"].insert("end", f"[{role_tag}] >> {content}\n\n")
-            pane["text"].configure(state="disabled")
-            pane["text"].see("end")
+                pane.append_message(role_tag, content)
 
-    def _send_message(self):
-        prompt = self.input_box.get()
+    def _send_message(self, widget):
+        prompt = self.input_entry.get_text()
         if not prompt: return
         
         is_new_session = False
@@ -277,55 +272,47 @@ class SemanticMemoryApp(ctk.CTk):
             is_new_session = True
             title = f"HANDSHAKE_{time.strftime('%H%M%S')}"
             self.current_session_id = self.orchestrator.sqlite.create_session(title)
-            self.title_label.configure(text=f"CONNECTED // {title}")
+            self.title_label.set_text(f"CONNECTED // {title}")
             self._load_sessions()
             
-        self.input_box.delete(0, "end")
-        self._append_message(self.chat_left, "USER", prompt)
+        self.input_entry.set_text("")
+        self.chat_left.append_message("USER", prompt)
         if self.comparison_mode:
-            self._append_message(self.chat_right, "USER", prompt)
+            self.chat_right.append_message("USER", prompt)
             
         threading.Thread(target=self._generate_responses, args=(prompt, is_new_session)).start()
 
-    def _append_message(self, pane, role, content):
-        pane["text"].configure(state="normal")
-        safe_content = str(content)
-        pane["text"].insert("end", f"[{role}] >> {safe_content}\n\n")
-        pane["text"].configure(state="disabled")
-        pane["text"].see("end")
-
     def _generate_responses(self, prompt, is_new_session=False):
-        start_a = time.time()
-        resp_a = self.orchestrator.generate_method_a(self.current_session_id, prompt)
-        latency_a = (time.time() - start_a) * 1000
+        # Method A
+        res_a = self.orchestrator.generate_method_a(self.current_session_id, prompt)
+        resp_a = res_a["response"]
+        latency_a = res_a["latency_ms"]
+        vram_a = res_a["vram_gb"]
+        tokens_a = res_a["tokens"]
         
-        start_b = time.time()
-        resp_b = self.orchestrator.generate_method_b(self.current_session_id, prompt)
-        latency_b = (time.time() - start_b) * 1000
+        # Method B
+        res_b = self.orchestrator.generate_method_b(self.current_session_id, prompt)
+        resp_b = res_b["response"]
+        latency_b = res_b["latency_ms"]
+        vram_b = res_b["vram_gb"]
+        tokens_b = res_b["tokens"]
         
-        self.after(0, lambda: self._append_message(self.chat_left, "AI", resp_a))
-        self.after(0, lambda: self._update_telemetry(self.telemetry_left, latency_a, len(resp_a)//4, 3.8))
+        GLib.idle_add(self.chat_left.append_message, "AI", resp_a)
+        GLib.idle_add(self.telemetry_left.update, latency_a, tokens_a, vram_a)
         
         if self.comparison_mode:
-            self.after(0, lambda: self._append_message(self.chat_right, "AI", resp_b))
-            self.after(0, lambda: self._update_telemetry(self.telemetry_right, latency_b, len(resp_b)//4, 1.4))
+            GLib.idle_add(self.chat_right.append_message, "AI", resp_b)
+            GLib.idle_add(self.telemetry_right.update, latency_b, tokens_b, vram_b)
             
         self.orchestrator.store_interaction(self.current_session_id, prompt, resp_a)
         
         if is_new_session:
             new_title = self.orchestrator.summarize_session(prompt)
             self.orchestrator.sqlite.update_session_title(self.current_session_id, new_title)
-            self.after(0, lambda t=new_title: self.title_label.configure(text=f"CONNECTED // {t}"))
-            self.after(0, self._load_sessions)
-
-    def _update_telemetry(self, block, latency, tokens, vram):
-        block["latency"]["bar"].set(min(1.0, latency / 2000))
-        block["latency"]["label"].configure(text=f"[ {latency:.1f} ms ]")
-        block["tokens"]["bar"].set(min(1.0, tokens / 1000))
-        block["tokens"]["label"].configure(text=f"[ {int(tokens)} T ]")
-        block["vram"]["bar"].set(min(1.0, vram / 8))
-        block["vram"]["label"].configure(text=f"[ {vram:.1f} GB ]")
+            GLib.idle_add(self.title_label.set_text, f"CONNECTED // {new_title}")
+            GLib.idle_add(self._load_sessions)
 
 if __name__ == "__main__":
     app = SemanticMemoryApp()
-    app.mainloop()
+    import sys
+    app.run(sys.argv)
