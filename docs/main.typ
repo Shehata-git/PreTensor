@@ -21,6 +21,9 @@
   #v(0.5em)
   #text(size: 10pt)[An analysis of pre-tensor token contraction for LLM inference]
   
+  #v(0.5em)
+  #text(size: 10pt)[*Repository:* #link("https://github.com/Shehata-git/PreTensor")]
+  
   #v(1.5em)
   
   #align(center)[
