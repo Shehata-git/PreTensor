@@ -1,57 +1,11 @@
-#import "../mydocs/style.typ": conf
+#import "style.typ": conf
 
 #show: doc => conf(
   title: [Project PreTensor: Optimization Pipeline Engineering Report],
   doc,
 )
 
-#grid(
-  columns: (1fr, 1fr),
-  align(left)[#image("../typst/assets/logo1.jpg", height: 1.5cm)],
-  align(right)[#image("../typst/assets/logo2.jpg", height: 1.5cm)]
-)
-
-#align(center)[
-  #v(0.5em)
-  #text(size: 20pt, weight: "bold")[Project PreTensor]
-  
-  #v(0.2em)
-  #text(size: 13pt)[Optimization Pipeline Engineering Report]
-  
-  #v(0.5em)
-  #text(size: 10pt)[An analysis of pre-tensor token contraction for LLM inference]
-  
-  #v(0.5em)
-  #text(size: 10pt)[*Repository:* #link("https://github.com/Shehata-git/PreTensor")]
-  
-  #v(1.5em)
-  
-  #align(center)[
-    #block(
-      fill: rgb("#fafafa"),
-      inset: 1em,
-      radius: 0.1em,
-      stroke: (left: 3pt + rgb("#e03b24"), rest: 0.5pt + rgb("#e0e0e0")),
-      align(left)[
-        #text(size: 11pt, weight: "bold", fill: rgb("#e03b24"))[PRESENTED BY] \
-        #v(0.2em)
-        #text(size: 13pt, weight: "bold")[Mohamed Ahmed Mohamed Ali Shehata] \
-        #text(size: 10pt, fill: rgb("#555555"))[*Student ID:* 202203567]
-        
-        #v(0.8em)
-        #text(size: 11pt, weight: "bold", fill: rgb("#e03b24"))[EVALUATED BY] \
-        #v(0.2em)
-        #text(size: 10pt)[
-          Dr. Reham Hussein \
-          Eng. Shady Badir \
-          Eng. Noha Rashad
-        ]
-      ]
-    )
-  ]
-  
-  #v(0.5em)
-]
+#include "00-frontmatter.typ"
 
 #outline(title: "Table of Contents", depth: 2)
 
